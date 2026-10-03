@@ -17,7 +17,23 @@
               "    var jsonData = pm.response.json();",
               "    pm.environment.set('customer_id', jsonData.data.id);",
               "    pm.environment.set('customer_email', jsonData.data.email);",
-              "}"
+              "}",
+              "",
+              "pm.test(\"Customer created: status 201\", function () {",
+              "    pm.response.to.have.status(201);",
+              "});",
+              "pm.test(\"Response is JSON\", function () {",
+              "    pm.response.to.be.json;",
+              "});",
+              "pm.test(\"Customer has an id\", function () {",
+              "    var j = pm.response.json();",
+              "    pm.expect(j.data).to.be.an('object');",
+              "    pm.expect(j.data.id).to.exist;",
+              "});",
+              "pm.test(\"Customer email matches the request\", function () {",
+              "    var j = pm.response.json();",
+              "    pm.expect(j.data.email).to.eql(pm.environment.get('unique_email'));",
+              "});"
             ],
             "type": "text/javascript"
           }
@@ -68,6 +84,26 @@
     },
     {
       "name": "Get Customers",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Customer found: status 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test(\"Response is JSON\", function () {",
+              "    pm.response.to.be.json;",
+              "});",
+              "pm.test(\"Returned id matches customer_id\", function () {",
+              "    var j = pm.response.json();",
+              "    pm.expect(String(j.data.id)).to.eql(String(pm.environment.get('customer_id')));",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
       "request": {
         "method": "GET",
         "header": [
@@ -102,6 +138,31 @@
     },
     {
       "name": "Find Customer",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Customer found: status 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test(\"Response is JSON\", function () {",
+              "    pm.response.to.be.json;",
+              "});",
+              "pm.test(\"Returned id matches customer_id\", function () {",
+              "    var j = pm.response.json();",
+              "    pm.expect(String(j.data.id)).to.eql(String(pm.environment.get('customer_id')));",
+              "});",
+              "",
+              "pm.test(\"Returned email matches the created customer\", function () {",
+              "    var j = pm.response.json();",
+              "    pm.expect(j.data.email).to.eql(pm.environment.get('customer_email'));",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
       "request": {
         "method": "GET",
         "header": [],
@@ -129,7 +190,19 @@
               "if (pm.response.code === 201) {",
               "    var jsonData = pm.response.json();",
               "    pm.environment.set('account_id_sender', jsonData.data.id);",
-              "}"
+              "}",
+              "",
+              "pm.test(\"Account 1 created: status 201\", function () {",
+              "    pm.response.to.have.status(201);",
+              "});",
+              "pm.test(\"Response is JSON\", function () {",
+              "    pm.response.to.be.json;",
+              "});",
+              "pm.test(\"Account 1 has an id\", function () {",
+              "    var j = pm.response.json();",
+              "    pm.expect(j.data).to.be.an('object');",
+              "    pm.expect(j.data.id).to.exist;",
+              "});"
             ],
             "type": "text/javascript"
           }
@@ -176,7 +249,19 @@
               "if (pm.response.code === 201) {",
               "    var jsonData = pm.response.json();",
               "    pm.environment.set('account_id_receiver', jsonData.data.id);",
-              "}"
+              "}",
+              "",
+              "pm.test(\"Account 2 created: status 201\", function () {",
+              "    pm.response.to.have.status(201);",
+              "});",
+              "pm.test(\"Response is JSON\", function () {",
+              "    pm.response.to.be.json;",
+              "});",
+              "pm.test(\"Account 2 has an id\", function () {",
+              "    var j = pm.response.json();",
+              "    pm.expect(j.data).to.be.an('object');",
+              "    pm.expect(j.data.id).to.exist;",
+              "});"
             ],
             "type": "text/javascript"
           }
@@ -215,6 +300,26 @@
     },
     {
       "name": "Create new Transfer",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Transfer accepted: status 200 or 201\", function () {",
+              "    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+              "});",
+              "pm.test(\"Response is JSON\", function () {",
+              "    pm.response.to.be.json;",
+              "});",
+              "pm.test(\"Transfer response has data\", function () {",
+              "    var j = pm.response.json();",
+              "    pm.expect(j.data).to.exist;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
       "request": {
         "method": "POST",
         "header": [
@@ -263,7 +368,16 @@
         "type": "text/javascript",
         "packages": {},
         "requests": {},
-        "exec": []
+        "exec": [
+          "pm.test(\"Response time < 5000 ms\", function () {",
+          "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+          "});",
+          "pm.test(\"No stack trace leaked in the response\", function () {",
+          "    var text = pm.response.text();",
+          "    pm.expect(text).to.not.include('stackTrace');",
+          "    pm.expect(text).to.not.include('at com.m2ibank');",
+          "});"
+        ]
       }
     }
   ],

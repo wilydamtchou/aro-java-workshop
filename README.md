@@ -1,20 +1,35 @@
-# DigiBank - Workshop 3 and Workshop 4 README
+# DigiBank - TP Java / Spring Boot sur Red Hat OpenShift
 
-## Overview
+## Présentation
 
-This repository contains the DigiBank implementation aligned with **Workshop 3: Dynamic Security Analysis of DigiBank at Runtime** and **Workshop 4: Securing containers, dependencies, and deployment artifacts** from the course *UCC152-2 Introduction to Security in DevOps*.
+Ce dépôt contient **DigiBank**, une application bancaire Spring Boot modulaire, ainsi que le pipeline **GitHub Actions** qui la construit, la teste et la déploie sur le **Red Hat OpenShift Developer Sandbox**.
 
-The project therefore documents and implements two complementary security stages: runtime security validation through DAST in Workshop 3, then container, dependency, and artifact hardening with pipeline automation in Workshop 4.
+Le TP prolonge les ateliers de sécurité précédents (Workshop 3 : analyse dynamique, Workshop 4 : conteneurs, dépendances et artefacts) avec une nouvelle étape : **livrer l'application sur une plateforme Kubernetes/OpenShift de manière automatisée et reproductible**, puis vérifier le déploiement avec des tests d'API.
 
-## Project purpose
+## Objectifs du TP
 
-DigiBank is used as a realistic case study for a modern banking application with REST endpoints, a database, business services, containerized delivery, and CI/CD automation. The goal is to secure the application from the source code level all the way to the packaged image and the delivery pipeline.
+- Comprendre les concepts de base d'OpenShift : projet (namespace), BuildConfig, ImageStream, Deployment, Service, Route.
+- Déployer une application Spring Boot avec la méthode **S2I (Source-to-Image)** en *binary build*, sans Dockerfile.
+- Externaliser la configuration de l'application dans des variables d'environnement.
+- Automatiser build, tests et déploiement avec GitHub Actions, avec un lancement manuel et le choix de la branche.
+- Valider le déploiement : health check Actuator, Swagger/OpenAPI, tests d'API Newman.
 
-Workshop 3 focuses on how the application behaves when it runs, while Workshop 4 focuses on what the application imports, packages, ships, and executes inside containers and build artifacts.
+## Stack technique
 
-## Repository structure
+| Élément | Version / outil |
+|---|---|
+| Java | 21 (Temurin) |
+| Spring Boot | 3.4.3 |
+| Build | Maven (projet multi-modules) |
+| Base de données (déploiement) | H2 en mémoire + Flyway |
+| Documentation d'API | springdoc-openapi (Swagger UI) |
+| Supervision | Spring Boot Actuator |
+| Tests | JUnit 5, Cucumber, JaCoCo |
+| Tests d'API | Postman / Newman |
+| Plateforme | Red Hat OpenShift Developer Sandbox |
+| CI/CD | GitHub Actions |
 
-A recommended structure for this project is:
+## Structure du dépôt
 
 ```text
 digibank-parent/
@@ -22,281 +37,196 @@ digibank-parent/
 ├── customer-module/
 ├── account-module/
 ├── transfer-module/
-├── digibank-web/
+├── digibank-web/                  # application exécutable (jar Spring Boot)
 ├── dast/
-│   ├── postman/
-│   ├── zap/
-│   └── reports/
-├── container-security/
-│   ├── reports/
-│   ├── notes/
-│   └── scripts/
+│   └── postman/                   # collection et environnement Newman
 ├── .github/
 │   └── workflows/
-├── Dockerfile
-├── .dockerignore
-├── docker-compose.yml
+│       └── deploy-openshift.yml   # pipeline build + tests + déploiement + Newman
 ├── pom.xml
 └── README.md
 ```
 
-The repository may also contain exported reports, screenshots, notes, and scripts used during validation and remediation.
+Le `Dockerfile` et le `docker-compose.yml` des ateliers précédents restent utilisables en local (par exemple pour PostgreSQL), mais **ils ne sont pas utilisés par le déploiement OpenShift**.
 
-# Workshop 3
+## Architecture du déploiement
 
-## Objective
+```text
+GitHub Actions
+   │  1. build du jar (Maven)
+   │  2. tests unitaires, Cucumber, JaCoCo
+   ▼
+oc start-build (binary build S2I)
+   │  jar -> image builder ubi9/openjdk-21
+   ▼
+ImageStream  ->  Deployment (1 pod)  ->  Service  ->  Route HTTPS
+                                                        │
+                                              Newman (tests d'API)
+```
 
-Workshop 3 extends the security work done previously by validating DigiBank at runtime with a DAST mindset. The aim is to detect weaknesses visible through HTTP behavior, validate the application’s response quality, remediate the issues found, and then re-run the same scenarios to prove the corrections.
+Le jar est construit dans GitHub Actions, puis envoyé à OpenShift. L'image est assemblée dans le cluster par S2I à partir de l'image builder Java de Red Hat (`registry.access.redhat.com/ubi9/openjdk-21`). Cette image s'exécute avec un utilisateur non-root, comme l'exige OpenShift.
 
-## Workshop 3 scope
+## Prérequis
 
-The Workshop 3 scope covers observable runtime weaknesses such as endpoint behavior, request validation, status codes, error handling, information leakage, and authorization or session-related issues visible from the outside. It does not primarily focus on dependency analysis, Docker hardening, or pipeline security, which belong to Workshop 4.
+### 1. Developer Sandbox activé
 
-## Expected Workshop 3 outcomes
+1. Aller sur <https://developers.redhat.com/developer-sandbox> et cliquer sur **Launch your Developer Sandbox**.
+2. Se connecter avec un compte Red Hat et terminer la vérification demandée.
+3. Vérifier dans la console, perspective **Developer**, la présence du projet `<utilisateur>-dev`.
 
-At the end of the DAST phase, the project should demonstrate:
+Les projets du Sandbox sont créés automatiquement : il n'est pas possible d'en créer soi-même (`oc new-project` est refusé).
 
-- Controlled HTTP responses and generic error messages.
-- Stronger validation at the API and service layers.
-- Reduced exposure of sensitive data in responses.
-- Reproducible testing through Postman, curl, Newman, and optionally OWASP ZAP.
-- Documented evidence of before/after correction behavior.
+### 2. Secrets GitHub
 
-## Workshop 3 checklist
+Dans le dépôt : **Settings → Secrets and variables → Actions → New repository secret**.
 
-- Start DigiBank in a stable environment.
-- Verify the main endpoints are accessible.
-- Explore the API using Swagger or Postman where enabled.
-- Run nominal and invalid scenarios on customers, accounts, and transfers.
-- Observe response codes, error messages, and data exposure.
-- Fix the weaknesses in DTOs, services, and exception handlers.
-- Replay the same tests to validate the fix.
+| Secret | Description | Exemple |
+|---|---|---|
+| `OPENSHIFT_SERVER` | URL de l'API du cluster | `https://api.sandbox-xxxx.openshiftapps.com:6443` |
+| `OPENSHIFT_TOKEN` | Token de connexion | obtenu via *Copy login command → Display Token* |
+| `OPENSHIFT_NAMESPACE` | Projet de déploiement | `monutilisateur-dev` |
 
-## Workshop 3 test scenarios
+Le token du Sandbox expire après environ 24 heures. Quand le login échoue avec *Unauthorized*, il faut le régénérer et mettre le secret à jour.
 
-### Customers
+### 3. Fichiers Newman
 
-Typical customer tests include creating a valid customer, trying an invalid email, sending malformed phone numbers or national IDs, checking duplicate email behavior, and querying a non-existent customer.
+Les deux fichiers doivent exister à ces chemins :
 
-### Accounts
+- `dast/postman/DigiBank-DAST-Collection.postman_collection.json`
+- `dast/postman/DigiBank-Local.postman_environment.json`
 
-Typical account tests include creating a valid account, attempting a negative balance, and querying a non-existent account.
+L'environnement doit contenir la variable `baseUrl`. Le pipeline la remplace par l'URL de la route OpenShift.
 
-### Transfers
+## Lancer le pipeline
 
-Typical transfer tests include a normal transfer, transfer to the same account, zero-amount transfer, and insufficient-balance transfer.
+Le pipeline se lance **uniquement à la main** :
 
-## Workshop 3 commands
+1. Ouvrir l'onglet **Actions** du dépôt.
+2. Choisir le workflow **DigiBank - Build, Tests & Deploy OpenShift Sandbox**.
+3. Cliquer sur **Run workflow**, saisir la **branche** à déployer (par défaut `main`), puis valider.
+
+Le menu « Use workflow from » désigne la branche d'où provient le fichier du workflow. Le code construit et déployé est celui de la branche saisie dans le champ `branch`.
+
+### Étapes du pipeline
+
+| Étape | Job | Rôle |
+|---|---|---|
+| 1 | `build` | Compile et empaquette le projet (`mvn package -DskipTests`) et publie le jar |
+| 2 | `unit-tests` | Tests JUnit (hors Cucumber) |
+| 2 | `cucumber-tests` | Scénarios Cucumber |
+| 2 | `jacoco` | Rapport de couverture de code |
+| 3 | `deploy` | Build S2I dans OpenShift, déploiement, probes, validation Actuator et Swagger |
+| 4 | `newman` | Tests d'API sur l'application déployée |
+
+Les étapes 2 s'exécutent en parallèle. Le déploiement ne démarre que si les trois jobs de test réussissent. Ce pipeline ne contient volontairement ni analyse statique ni scan OWASP ZAP, qui restent dans le pipeline DevSecOps complet.
+
+## Configuration de l'application dans OpenShift
+
+Les variables du pod sont définies à un seul endroit, dans le bloc `APP_ENV` du workflow :
+
+```yaml
+APP_ENV: |
+  SPRING_PROFILES_ACTIVE=dev
+  SPRING_DATASOURCE_URL=jdbc:h2:mem:digibank;DB_CLOSE_DELAY=-1
+  SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.h2.Driver
+  SPRING_DATASOURCE_USERNAME=sa
+  SPRING_DATASOURCE_PASSWORD=
+  SPRING_FLYWAY_LOCATIONS=classpath:db/migration/h2
+  SPRING_FLYWAY_DEFAULT_SCHEMA=PUBLIC
+  SPRING_FLYWAY_SCHEMAS=PUBLIC
+  ...
+```
+
+Points importants :
+
+- **Profil `dev`** : il active Swagger/OpenAPI, nécessaire pour valider le déploiement.
+- **H2 à la place de PostgreSQL** : le profil `dev` est écrit pour PostgreSQL. Les variables d'environnement, prioritaires sur les fichiers `application*.yml`, redirigent le driver et les migrations Flyway vers H2, **sans modifier les fichiers de configuration**.
+- **Un seul réplica** : la base H2 est en mémoire, chaque pod aurait sa propre base. La base est réinitialisée à chaque déploiement.
+- **Probes** : `/actuator/health/readiness` et `/actuator/health/liveness`.
+- **Ressources** : requests 100m CPU / 384Mi, limits 500m CPU / 768Mi, adaptées aux quotas du Sandbox.
+
+Pour ajouter ou modifier une variable, il suffit d'éditer `APP_ENV`. Supprimer une ligne ne retire pas la variable du cluster : utiliser `oc set env deployment/digibank NOM_VAR-`.
+
+## Vérifier le déploiement
+
+À la fin du job `deploy`, le résumé du run affiche l'URL de l'application. Les vérifications automatiques sont :
+
+- `GET /actuator/health` doit répondre avec succès.
+- `GET /v3/api-docs` doit retourner une spécification OpenAPI valide.
+- `GET /swagger-ui.html` doit être accessible.
+
+Vérifications manuelles avec la CLI `oc` :
+
+```bash
+oc login --token=<token> --server=<serveur>
+oc project <utilisateur>-dev
+
+oc get pods
+oc logs -f deployment/digibank
+oc get route digibank
+oc describe deployment/digibank
+```
+
+## Tests d'API (Newman)
+
+La collection exécute le scénario suivant, avec des assertions sur chaque requête :
+
+1. Création d'un client
+2. Lecture du client
+3. Création de deux comptes
+4. Création d'un transfert
+
+Un test commun vérifie aussi le temps de réponse (moins de 5 secondes) et l'absence de stack trace dans les réponses. Newman est lancé avec `--bail` : il s'arrête à la première requête en échec. Les rapports (`newman-report.html` et `newman-report.json`) sont publiés comme artefacts du run.
+
+Lancer la collection en local :
+
+```bash
+newman run dast/postman/DigiBank-DAST-Collection.postman_collection.json \
+  -e dast/postman/DigiBank-Local.postman_environment.json \
+  --env-var "baseUrl=http://localhost:8080"
+```
+
+## Exécution en local
 
 ```bash
 mvn clean install
-mvn spring-boot:run -pl digibank-web
-curl -i http://localhost:8080/api/customers/99999
-newman run DigiBank-DAST.postman_collection.json -e DigiBank-Local.postman_environment.json
+SPRING_PROFILES_ACTIVE="" mvn spring-boot:run -pl digibank-web
 ```
 
-The workshop also encourages using OWASP ZAP to observe routes, headers, and response patterns directly from the running application.
+Sans profil, l'application démarre avec H2 en mémoire. Pour PostgreSQL en local, utiliser le `docker-compose.yml` avec le profil `dev` ou `qa`.
 
-## Workshop 3 evidence
+## Dépannage
 
-For each issue identified dynamically, keep evidence of:
+| Symptôme | Cause probable | Solution |
+|---|---|---|
+| `Unauthorized` au login | Token expiré | Régénérer le token et mettre à jour `OPENSHIFT_TOKEN` |
+| Secret manquant | Secret non créé | Ajouter le secret indiqué dans l'erreur |
+| Échec au pull de l'image builder | Tag indisponible | Vérifier `oc get is -n openshift \| grep -i openjdk`, puis adapter `BUILDER_IMAGE` |
+| Le build utilise une ancienne stratégie | BuildConfig créé lors d'un essai précédent | `oc delete bc/digibank`, puis relancer |
+| Pod en `Pending` | Quota du Sandbox dépassé | Réduire les ressources ou supprimer les anciennes applications |
+| Pod redémarré en boucle au démarrage | Démarrage lent, CPU limité | Augmenter les délais des probes |
+| `/v3/api-docs` répond 401 ou 403 | Spring Security bloque Swagger | Autoriser `/v3/api-docs/**`, `/swagger-ui/**` et `/swagger-ui.html` |
+| Newman cible `localhost` | Nom de variable différent | Aligner `NEWMAN_BASE_URL_VAR` avec le fichier d'environnement |
+| Application endormie | Inactivité du Sandbox | `oc scale deployment/digibank --replicas=1` ou relancer le pipeline |
 
-- The endpoint tested.
-- The request executed.
-- The observed response before correction.
-- The vulnerability type.
-- The impact on the application or data exposure.
-- The fix implemented.
-- The revalidation result after correction.
+## Limites du Developer Sandbox
 
-## Workshop 3 remediation themes
+- Environnement temporaire (environ 30 jours, renouvelable), non destiné à la production.
+- Ressources et stockage limités.
+- Pods mis en veille après une période d'inactivité.
+- Aucun droit d'administration du cluster : pas de création de projets, pas d'opérateurs.
 
-The main remediation themes expected in Workshop 3 are:
+## Notes de sécurité
 
-- Stronger input validation.
-- Reduced data exposure in response DTOs.
-- Safer centralized error handling.
-- Stronger service-layer safeguards for business rules.
-- Controlled Swagger exposure by profile.
+- Le profil `dev` expose Swagger, affiche les détails du health check et peut renvoyer des stack traces. L'URL de la route est publique : ne pas la partager et ne pas y déposer de données réelles.
+- Aucun secret n'est stocké dans le dépôt : l'accès au cluster passe par les secrets GitHub, et les variables du pod ne contiennent aucun mot de passe sensible (base H2 en mémoire).
+- Le scan Trivy du pipeline complet analyse l'image construite à partir du Dockerfile, pas l'image assemblée par S2I dans OpenShift. L'image S2I repose sur une image de base Red Hat maintenue et s'exécute en non-root.
+- Pour un environnement partagé, repasser Swagger en mode désactivé (profil `qa`) et limiter le health check détaillé.
 
-# Workshop 4
+## Pour aller plus loin
 
-## Objective
-
-Workshop 4 extends the security work by analyzing DigiBank as a complete software artifact: code, dependencies, container images, build files, secrets handling, and CI/CD controls. The goal is to reduce attack surface, detect vulnerable dependencies, harden the container, and automate the checks in the pipeline.
-
-## Workshop 4 scope
-
-The Workshop 4 scope includes Maven dependencies, transitive dependencies, pom.xml configuration, Dockerfile, docker-compose.yml, .dockerignore, runtime environment variables, secrets handling, image metadata, and GitHub Actions workflows related to dependency and container security. It does not primarily repeat the runtime endpoint analysis covered in Workshop 3.
-
-## Expected Workshop 4 outcomes
-
-At the end of the container and dependency security phase, the project should demonstrate:
-
-- Controlled and versioned dependency management.
-- A usable Dockerfile with clear build/runtime separation.
-- A reduced and better protected container image.
-- Externalized secrets and safer environment-variable usage.
-- Dependency and container checks automated in GitHub Actions.
-- Traceable evidence through reports and image metadata.
-
-## Workshop 4 checklist
-
-- Reopen the existing DigiBank project cleanly in IntelliJ IDEA.
-- Run a full Maven build from the parent project.
-- Inspect the dependency graph with Maven.
-- Run OWASP Dependency-Check.
-- Build and inspect the Docker image.
-- Review the Docker history and image metadata.
-- Verify `.dockerignore` limits the build context.
-- Verify secrets are not hard-coded in versioned files or image layers.
-- Prepare and run the GitHub Actions workflow.
-- Add Trivy image scanning in the pipeline.
-
-## Recommended technical stack
-
-The workshop uses the following tools and technologies:
-
-- Java JDK 17.
-- Maven 3.9.x.
-- Spring Boot.
-- Docker and Docker Compose.
-- OWASP Dependency-Check.
-- Trivy.
-- Git and GitHub.
-- GitHub Actions.
-
-## Configuration principles
-
-The Spring configuration should remain environment-driven and avoid hard-coded secrets. The `application.yml`, `application-dev.yml`, and `application-test.yml` files should use variables for datasource settings and keep security-sensitive defaults under control.
-
-Swagger/OpenAPI should remain disabled by default outside the development profile, and error exposure should stay minimal in shared artifacts.
-
-## Maven and dependency control
-
-The parent `pom.xml` is the main entry point for dependency analysis and version centralization. It should contain consistent version properties for the build and security plugins, plus the OWASP Dependency-Check plugin configured to fail the build when needed.
-
-Useful commands include:
-
-```bash
-mvn clean
-mvn compile
-mvn test
-mvn clean verify
-mvn dependency:tree
-mvn org.owasp:dependency-check-maven:check
-mvn org.owasp:dependency-check-maven:purge
-```
-
-## Dockerfile and image hardening
-
-The Dockerfile should use a multi-stage build so that Maven is only present in the build stage and the final runtime image contains only the necessary Java runtime and packaged application. This reduces the attack surface and makes the artifact easier to inspect and maintain.
-
-The final image should also be evaluated for:
-
-- Base image choice.
-- Layer count and image size.
-- Port exposure.
-- Runtime user privileges.
-- Unnecessary components in the final image.
-
-## `.dockerignore`
-
-A proper `.dockerignore` file should exclude build outputs, IDE files, local secrets, logs, temporary notes, DAST folders, and reports that do not belong in the container build context. This reduces accidental file leakage into Docker layers and keeps the build context clean.
-
-## Docker Compose
-
-A working `docker-compose.yml` should start DigiBank and PostgreSQL in a reproducible environment with environment variables rather than hard-coded credentials. This helps keep the setup close to a real deployment while still remaining suitable for local analysis and automation.
-
-## Trivy integration
-
-Trivy is added to analyze the final Docker image for vulnerabilities in system packages, embedded libraries, secrets, and misconfigurations. In the final pipeline, Trivy complements Dependency-Check by covering the image layer rather than only Maven dependencies.
-
-## Workshop 4 commands
-
-```bash
-mvn clean install
-mvn dependency:tree
-mvn org.owasp:dependency-check-maven:check
-docker build -t digibank:local .
-docker image inspect digibank:local
-docker history digibank:local
-docker compose up --build
-```
-
-## Workshop 4 evidence
-
-For each finding or remediation, keep evidence of:
-
-- The component or artifact analyzed.
-- The file or image involved.
-- The weakness detected.
-- The tool used to detect it.
-- The risk level and impact.
-- The remediation applied.
-- The verification command or rerun result.
-
-## Workshop 4 remediation themes
-
-The main remediation themes expected in Workshop 4 are:
-
-- Minimize the container image.
-- Use a non-root runtime user.
-- Remove secrets from versioned files and image layers.
-- Update or replace vulnerable dependencies.
-- Limit Swagger exposure to development only.
-- Integrate automated dependency and image checks into the CI/CD pipeline.
-
-# CI/CD pipeline
-
-## Pipeline overview
-
-The GitHub Actions workflow is designed as a complete DevSecOps pipeline combining build, tests, static analysis, dependency scanning, Docker image creation, Trivy scanning, runtime deployment, Newman, and OWASP ZAP checks. The pipeline also archives reports and metadata as artifacts for traceability.
-
-## Main pipeline stages
-
-- Build and unit tests.
-- Cucumber tests.
-- JaCoCo coverage.
-- Secret scanning with Gitleaks.
-- OWASP Dependency-Check.
-- SpotBugs, PMD, Checkstyle, and PIT.
-- SonarQube quality gate.
-- Docker image build.
-- Trivy image scan.
-- Runtime deployment with PostgreSQL.
-- Newman API verification.
-- OWASP ZAP scanning.
-- Final artifact publication.
-
-## Pipeline secrets
-
-Secrets such as `NVD_API_KEY`, SonarQube credentials, and any registry or deployment credentials must remain outside the repository and be injected at runtime through GitHub Secrets or equivalent mechanisms.
-
-## Final validation criteria
-
-The project can be considered complete when all of the following are true:
-
-- The application still builds and runs normally.
-- DAST weaknesses are remediated and revalidated.
-- Dependency and container findings are reduced or justified.
-- The Docker image is cleaner and more controlled.
-- The pipeline reruns the main security checks automatically.
-- Artifacts and reports are preserved for traceability.
-
-## Revalidation commands
-
-```bash
-mvn clean
-mvn test
-mvn clean verify
-mvn dependency:tree
-mvn org.owasp:dependency-check-maven:check -DnvdApiKey=YOUR_NVD_API_KEY
-docker build -t digibank:final .
-trivy image --severity HIGH,CRITICAL digibank:final
-```
-
-## Repository usage
-
-This README is intended as the main technical and pedagogical entry point for the DigiBank project. It summarizes the security work completed in Workshop 3 and Workshop 4, and it documents the source code, runtime validation, container hardening, dependency management, and CI/CD security automation required for the course.
-```
+- Utiliser un **ServiceAccount** dédié et un token à longue durée à la place du token personnel.
+- Remplacer H2 par une vraie base PostgreSQL déployée sur le Sandbox.
+- Ajouter un scan de l'image déployée et un scan OWASP ZAP sur la route OpenShift.
+- Décrire le déploiement en manifestes **Helm** ou **Kustomize** versionnés dans le dépôt.
+- Passer à OpenShift Pipelines (Tekton) pour exécuter le build directement dans le cluster.

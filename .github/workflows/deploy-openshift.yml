@@ -1,0 +1,399 @@
+name: DigiBank - Build, Tests & Deploy OpenShift Sandbox
+
+# Build du jar -> tests du code (unitaires, Cucumber, JaCoCo) -> déploiement OpenShift -> Newman.
+# Pas d'analyse statique ni de ZAP dans ce pipeline.
+# À placer dans .github/workflows/deploy-openshift.yml
+#
+# Lancement MANUEL uniquement : Actions > ce workflow > Run workflow > saisir la branche.
+#
+# Déploiement : S2I binary build (image builder Java Red Hat). Pas de Dockerfile ni de docker-compose.
+#
+# Secrets requis (Settings > Secrets and variables > Actions) :
+#   OPENSHIFT_SERVER     ex: https://api.sandbox-xxxx.openshiftapps.com:6443
+#   OPENSHIFT_TOKEN      token (Copy login command > Display Token), expire ~24h
+#   OPENSHIFT_NAMESPACE  ex: monuser-dev
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branche à construire et déployer"
+        required: true
+        default: main
+        type: string
+
+run-name: "Deploy DigiBank - branche ${{ inputs.branch }}"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.branch }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+###############################################################
+# VARIABLES GLOBALES
+###############################################################
+env:
+  CI: true
+  # Profil Spring des jobs de build/tests sur les runners (H2 par défaut, aucun profil)
+  SPRING_PROFILES_ACTIVE: ""
+
+  APP_NAME: digibank
+  JAVA_VERSION: "21"
+
+  # Image builder S2I (Java 21) utilisée par OpenShift pour construire l'image
+  BUILDER_IMAGE: registry.access.redhat.com/ubi9/openjdk-21:latest
+
+  # Nom de la variable d'URL dans DigiBank-Local.postman_environment.json
+  NEWMAN_BASE_URL_VAR: baseUrl
+
+  # Ressources du pod
+  APP_REPLICAS: "1"          # H2 en mémoire : garder 1 seul réplica
+  APP_CPU_REQUEST: 100m
+  APP_MEM_REQUEST: 384Mi
+  APP_CPU_LIMIT: 500m
+  APP_MEM_LIMIT: 768Mi
+
+  # Variables injectées dans le pod OpenShift (une par ligne, format CLE=VALEUR)
+  # Pas de guillemets autour des valeurs.
+  APP_ENV: |
+    SPRING_PROFILES_ACTIVE=dev
+    SPRING_DATASOURCE_URL=jdbc:h2:mem:digibank;DB_CLOSE_DELAY=-1
+    SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.h2.Driver
+    SPRING_DATASOURCE_USERNAME=sa
+    SPRING_DATASOURCE_PASSWORD=
+    SPRING_FLYWAY_LOCATIONS=classpath:db/migration/h2
+    SPRING_FLYWAY_DEFAULT_SCHEMA=PUBLIC
+    SPRING_FLYWAY_SCHEMAS=PUBLIC
+    SPRING_JPA_SHOW_SQL=false
+    LOGGING_LEVEL_ROOT=INFO
+    LOGGING_LEVEL_ORG_HIBERNATE_SQL=INFO
+    SERVER_PORT=8080
+    JAVA_MAX_MEM_RATIO=70
+
+jobs:
+
+  ###############################################################
+  # PARTIE 1 — BUILD + TESTS DU CODE
+  ###############################################################
+
+  build:
+    name: Build DigiBank
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+      - name: Setup Temurin JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - name: Build project
+        run: |
+          mvn \
+            -B \
+            clean \
+            package \
+            -DskipTests
+      - name: Upload compiled application
+        uses: actions/upload-artifact@v4
+        with:
+          name: digibank-build
+          path: digibank-web/target/digibank-web-*.jar
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - name: Execute JUnit Tests
+        run: |
+          mvn \
+            -B \
+            test \
+            -Dtest='!RunCucumberTest' \
+            -DfailIfNoTests=false \
+            -Dsurefire.failIfNoSpecifiedTests=false
+      - name: Upload Unit Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: '**/target/surefire-reports/**'
+
+  cucumber-tests:
+    name: Cucumber Tests
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - name: Execute Cucumber Tests
+        run: |
+          mvn \
+            -B \
+            test \
+            -Dtest='RunCucumberTest' \
+            -DfailIfNoTests=false \
+            -Dsurefire.failIfNoSpecifiedTests=false
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cucumber-reports
+          path: '**/target/surefire-reports/**'
+
+  jacoco:
+    name: JaCoCo Coverage
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - name: Generate Coverage
+        run: |
+          mvn \
+            -B \
+            jacoco:prepare-agent \
+            test \
+            jacoco:report
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jacoco-report
+          path: |
+            **/target/site/jacoco/**
+
+  ###############################################################
+  # PARTIE 2 — DÉPLOIEMENT OPENSHIFT SANDBOX
+  ###############################################################
+
+  deploy:
+    name: Deploy DigiBank (OpenShift Sandbox)
+    runs-on: ubuntu-latest
+    needs:
+      - unit-tests
+      - cucumber-tests
+      - jacoco
+    timeout-minutes: 30
+    concurrency:
+      group: deploy-openshift
+      cancel-in-progress: false
+    outputs:
+      app_url: ${{ steps.url.outputs.app_url }}
+
+    steps:
+      # --- Prérequis ---
+      - name: Vérifier les secrets requis
+        env:
+          OPENSHIFT_SERVER: ${{ secrets.OPENSHIFT_SERVER }}
+          OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
+          OPENSHIFT_NAMESPACE: ${{ secrets.OPENSHIFT_NAMESPACE }}
+        run: |
+          missing=0
+          for v in OPENSHIFT_SERVER OPENSHIFT_TOKEN OPENSHIFT_NAMESPACE; do
+            if [ -z "${!v}" ]; then
+              echo "::error::Secret manquant : $v"
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: Récupérer le jar compilé (job build)
+        uses: actions/download-artifact@v4
+        with:
+          name: digibank-build
+          path: digibank-web/target
+
+      - name: Vérifier le jar
+        run: |
+          ls -l digibank-web/target/
+          test "$(ls digibank-web/target/digibank-web-*.jar | wc -l)" -eq 1 \
+            || { echo "::error::Il doit y avoir exactement un jar"; exit 1; }
+
+      # --- Connexion OpenShift ---
+      - name: Installer oc
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: latest
+
+      - name: Login OpenShift
+        uses: redhat-actions/oc-login@v1
+        with:
+          openshift_server_url: ${{ secrets.OPENSHIFT_SERVER }}
+          openshift_token: ${{ secrets.OPENSHIFT_TOKEN }}
+          namespace: ${{ secrets.OPENSHIFT_NAMESPACE }}
+
+      - name: Infos du projet
+        run: |
+          oc whoami
+          oc project
+          oc get pods
+
+      # --- Build de l'image dans OpenShift (binary build S2I) ---
+      - name: BuildConfig (créé une seule fois)
+        run: |
+          oc get bc/$APP_NAME >/dev/null 2>&1 || \
+            oc new-build --name=$APP_NAME --binary --strategy=source \
+              --image="$BUILDER_IMAGE"
+
+      - name: Build de l'image
+        run: |
+          # L'image S2I Java copie le contenu de deployments/ dans /deployments
+          mkdir -p ctx/deployments
+          cp digibank-web/target/digibank-web-*.jar ctx/deployments/app.jar
+          oc start-build $APP_NAME --from-dir=ctx --follow --wait
+
+      # --- Déploiement ---
+      - name: Créer l'application et la route (une seule fois)
+        run: |
+          if ! oc get deployment/$APP_NAME >/dev/null 2>&1; then
+            oc new-app --image-stream=$APP_NAME:latest --name=$APP_NAME
+          fi
+          oc get route/$APP_NAME >/dev/null 2>&1 || \
+            oc create route edge $APP_NAME --service=$APP_NAME --port=8080
+
+      - name: Configurer l'application (profil dev + H2)
+        run: |
+          # Variables d'environnement du pod, lues depuis APP_ENV (stdin)
+          printf '%s\n' "$APP_ENV" | oc set env deployment/$APP_NAME --overwrite -e -
+
+          oc scale deployment/$APP_NAME --replicas=$APP_REPLICAS
+
+          oc set resources deployment/$APP_NAME \
+            --requests=cpu=$APP_CPU_REQUEST,memory=$APP_MEM_REQUEST \
+            --limits=cpu=$APP_CPU_LIMIT,memory=$APP_MEM_LIMIT
+
+          oc set probe deployment/$APP_NAME --readiness \
+            --get-url=http://:8080/actuator/health/readiness \
+            --initial-delay-seconds=30 --failure-threshold=10
+          oc set probe deployment/$APP_NAME --liveness \
+            --get-url=http://:8080/actuator/health/liveness \
+            --initial-delay-seconds=120 --failure-threshold=5
+
+          echo "Variables d'environnement du pod :"
+          oc set env deployment/$APP_NAME --list | grep -v PASSWORD
+
+      - name: Redémarrer et attendre le rollout
+        run: |
+          oc rollout restart deployment/$APP_NAME
+          oc rollout status deployment/$APP_NAME --timeout=300s
+
+      # --- Validation du déploiement ---
+      - name: Récupérer l'URL
+        id: url
+        run: |
+          HOST=$(oc get route $APP_NAME -o jsonpath='{.spec.host}')
+          echo "app_url=https://$HOST" >> "$GITHUB_OUTPUT"
+
+      - name: Attendre /actuator/health
+        run: |
+          URL=${{ steps.url.outputs.app_url }}
+          for i in {1..30}; do
+            if curl -sf "$URL/actuator/health"; then
+              echo
+              echo "Application prête"
+              exit 0
+            fi
+            echo "En attente du démarrage... ($i/30)"
+            sleep 5
+          done
+          echo "::error::L'application n'a pas démarré à temps"
+          oc logs deployment/$APP_NAME --tail=150
+          exit 1
+
+      - name: Valider Swagger / OpenAPI
+        run: |
+          URL=${{ steps.url.outputs.app_url }}
+
+          echo "Vérification de /v3/api-docs..."
+          curl -sf "$URL/v3/api-docs" -o api-docs.json
+          grep -q '"openapi"' api-docs.json
+          echo "Endpoints exposés : $(grep -o '"/[^"]*":{' api-docs.json | wc -l)"
+
+          echo "Vérification de Swagger UI..."
+          curl -sfL -o /dev/null -w "HTTP %{http_code}\n" "$URL/swagger-ui.html"
+
+      - name: Upload de la spec OpenAPI
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-spec
+          path: api-docs.json
+          if-no-files-found: ignore
+
+      - name: Logs de l'application (en cas d'échec)
+        if: failure()
+        run: |
+          oc get pods
+          oc describe deployment/$APP_NAME | tail -40
+          oc logs deployment/$APP_NAME --tail=200 || true
+
+      - name: Résumé
+        if: success()
+        run: |
+          {
+            echo "## Déploiement DigiBank réussi"
+            echo ""
+            echo "- Branche : ${{ inputs.branch }} (${{ github.sha }})"
+            echo "- Application : ${{ steps.url.outputs.app_url }}"
+            echo "- Swagger UI : ${{ steps.url.outputs.app_url }}/swagger-ui.html"
+            echo "- OpenAPI : ${{ steps.url.outputs.app_url }}/v3/api-docs"
+            echo "- Profil : dev (H2 en mémoire)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  ###############################################################
+  # PARTIE 3 — TESTS API (NEWMAN) SUR L'APPLICATION DÉPLOYÉE
+  ###############################################################
+
+  newman:
+    name: API Tests (Newman)
+    runs-on: ubuntu-latest
+    needs: deploy
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+      - name: Installer Newman
+        run: |
+          npm install -g newman newman-reporter-htmlextra
+      - name: Exécuter la collection Newman
+        run: |
+          newman run dast/postman/DigiBank-DAST-Collection.postman_collection.json \
+            --bail \
+            --environment dast/postman/DigiBank-Local.postman_environment.json \
+            --env-var "$NEWMAN_BASE_URL_VAR=${{ needs.deploy.outputs.app_url }}" \
+            --reporters cli,htmlextra,json \
+            --reporter-htmlextra-export newman-report.html \
+            --reporter-json-export newman-report.json
+      - name: Upload des rapports Newman
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-reports
+          path: |
+            newman-report.html
+            newman-report.json
