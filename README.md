@@ -76,20 +76,24 @@ Le jar est construit dans GitHub Actions, puis envoyé à OpenShift. L'image est
 
 Les projets du Sandbox sont créés automatiquement : il n'est pas possible d'en créer soi-même (`oc new-project` est refusé).
 
-### 2. Secrets GitHub
+### 2. Secret et variables GitHub
 
-Dans le dépôt : **Settings → Secrets and variables → Actions → New repository secret**.
+Dans le dépôt : **Settings → Secrets and variables → Actions**.
+
+**Onglet Secrets → New repository secret**
 
 | Secret | Description | Exemple |
 |---|---|---|
 | `OPENSHIFT_TOKEN` | Token de connexion | obtenu via *Copy login command → Display Token* |
 
-Dans le dépôt : **Settings → Secrets and variables → Actions → New repository variable**.
+**Onglet Variables → New repository variable**
 
-| Secret | Description | Exemple |
+| Variable | Description | Exemple |
 |---|---|---|
 | `OPENSHIFT_SERVER` | URL de l'API du cluster | `https://api.sandbox-xxxx.openshiftapps.com:6443` |
 | `OPENSHIFT_NAMESPACE` | Projet de déploiement | `monutilisateur-dev` |
+
+Le serveur et le namespace sont volontairement des **variables** et non des secrets. Ce ne sont pas des données sensibles, et GitHub masque dans les logs et dans les outputs de jobs toute chaîne qui correspond à la valeur d'un secret. Comme l'URL de la route contient le nom du projet (`digibank-<namespace>.apps...`), un namespace stocké en secret rendrait l'URL vide pour le job Newman.
 
 Le token du Sandbox expire après environ 24 heures. Quand le login échoue avec *Unauthorized*, il faut le régénérer et mettre le secret à jour.
 
@@ -123,6 +127,8 @@ Le menu « Use workflow from » désigne la branche d'où provient le fichier du
 | 3 | `deploy` | Build S2I dans OpenShift, déploiement, probes, validation Actuator et Swagger |
 | 4 | `newman` | Tests d'API sur l'application déployée |
 
+L'URL de la route est transmise au job `newman` par un artefact (`app-url`) en plus de l'output du job `deploy`.
+
 Les étapes 2 s'exécutent en parallèle. Le déploiement ne démarre que si les trois jobs de test réussissent. Ce pipeline ne contient volontairement ni analyse statique ni scan OWASP ZAP, qui restent dans le pipeline DevSecOps complet.
 
 ## Configuration de l'application dans OpenShift
@@ -151,6 +157,28 @@ Points importants :
 - **Ressources** : requests 100m CPU / 384Mi, limits 500m CPU / 768Mi, adaptées aux quotas du Sandbox.
 
 Pour ajouter ou modifier une variable, il suffit d'éditer `APP_ENV`. Supprimer une ligne ne retire pas la variable du cluster : utiliser `oc set env deployment/digibank NOM_VAR-`.
+
+## Stratégie de déploiement
+
+Le pipeline ne définit pas de stratégie explicite : le Deployment créé par `oc new-app` utilise celle par défaut, **RollingUpdate**.
+
+1. Le build S2I publie une nouvelle image dans l'ImageStream.
+2. `oc rollout restart` démarre un nouveau pod à côté de l'ancien.
+3. Quand la readiness probe du nouveau pod réussit, le trafic bascule, puis l'ancien pod est arrêté.
+4. `oc rollout status` attend la fin de ce processus. Si le nouveau pod ne devient jamais prêt, l'ancien reste en service et le job échoue.
+
+À savoir :
+
+- La base H2 est en mémoire et propre à chaque pod : **chaque déploiement repart d'une base vide**.
+- Pendant la bascule, deux pods coexistent brièvement. Si le quota du Sandbox est trop juste, le nouveau pod reste en `Pending`. Dans ce cas, passer en stratégie `Recreate` (courte coupure, une seule instance à la fois) :
+
+```bash
+oc patch deployment/digibank -p '{"spec":{"strategy":{"type":"Recreate"}}}'
+```
+
+- Il n'y a ni blue/green ni canary : une seule version tourne à la fois.
+
+La stratégie réellement appliquée se vérifie avec `oc get deployment digibank -o jsonpath='{.spec.strategy}'`.
 
 ## Vérifier le déploiement
 
@@ -181,7 +209,7 @@ La collection exécute le scénario suivant, avec des assertions sur chaque requ
 3. Création de deux comptes
 4. Création d'un transfert
 
-Un test commun vérifie aussi le temps de réponse (moins de 5 secondes) et l'absence de stack trace dans les réponses. Newman est lancé avec `--bail` : il s'arrête à la première requête en échec. Les rapports (`newman-report.html` et `newman-report.json`) sont publiés comme artefacts du run.
+Un test commun vérifie aussi le temps de réponse (moins de 5 secondes) et l'absence de stack trace dans les réponses. Newman est lancé avec `--bail` : il s'arrête à la première requête en échec. L'URL cible est injectée avec `--env-var "baseUrl=<url de la route>"`, ce qui remplace la valeur `localhost` du fichier d'environnement. Les rapports (`newman-report.html` et `newman-report.json`) sont publiés comme artefacts du run.
 
 Lancer la collection en local :
 
@@ -205,7 +233,8 @@ Sans profil, l'application démarre avec H2 en mémoire. Pour PostgreSQL en loca
 | Symptôme | Cause probable | Solution |
 |---|---|---|
 | `Unauthorized` au login | Token expiré | Régénérer le token et mettre à jour `OPENSHIFT_TOKEN` |
-| Secret manquant | Secret non créé | Ajouter le secret indiqué dans l'erreur |
+| Secret ou variable manquant(e) | Élément non créé, ou créé dans le mauvais onglet | Créer le secret (`OPENSHIFT_TOKEN`) ou la variable (`OPENSHIFT_SERVER`, `OPENSHIFT_NAMESPACE`) indiqué dans l'erreur |
+| Newman : `Invalid URI "http:///api/customers"` | URL vide : le namespace ou le serveur est encore stocké en secret et masqué par GitHub | Les créer comme variables, supprimer les anciens secrets du même nom, relancer |
 | Échec au pull de l'image builder | Tag indisponible | Vérifier `oc get is -n openshift \| grep -i openjdk`, puis adapter `BUILDER_IMAGE` |
 | Le build utilise une ancienne stratégie | BuildConfig créé lors d'un essai précédent | `oc delete bc/digibank`, puis relancer |
 | Pod en `Pending` | Quota du Sandbox dépassé | Réduire les ressources ou supprimer les anciennes applications |
@@ -224,7 +253,7 @@ Sans profil, l'application démarre avec H2 en mémoire. Pour PostgreSQL en loca
 ## Notes de sécurité
 
 - Le profil `dev` expose Swagger, affiche les détails du health check et peut renvoyer des stack traces. L'URL de la route est publique : ne pas la partager et ne pas y déposer de données réelles.
-- Aucun secret n'est stocké dans le dépôt : l'accès au cluster passe par les secrets GitHub, et les variables du pod ne contiennent aucun mot de passe sensible (base H2 en mémoire).
+- Aucun secret n'est stocké dans le dépôt : le token d'accès au cluster est un secret GitHub (le serveur et le namespace, non sensibles, sont des variables), et les variables du pod ne contiennent aucun mot de passe sensible (base H2 en mémoire).
 - Le scan Trivy du pipeline complet analyse l'image construite à partir du Dockerfile, pas l'image assemblée par S2I dans OpenShift. L'image S2I repose sur une image de base Red Hat maintenue et s'exécute en non-root.
 - Pour un environnement partagé, repasser Swagger en mode désactivé (profil `qa`) et limiter le health check détaillé.
 
