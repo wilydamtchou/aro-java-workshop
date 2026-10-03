@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>DigiBank - Home</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f7fb;
+            color: #1e293b;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            max-width: 980px;
+            margin: 60px auto;
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+        }
+
+        h1 {
+            color: #0f172a;
+            margin-bottom: 10px;
+        }
+
+        p {
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+
+        .badge {
+            display: inline-block;
+            background: #0ea5e9;
+            color: white;
+            padding: 8px 14px;
+            border-radius: 999px;
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+
+        .section {
+            margin-top: 30px;
+        }
+
+        .button {
+            display: inline-block;
+            text-decoration: none;
+            background: #2563eb;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-weight: bold;
+            transition: background 0.2s ease-in-out;
+        }
+
+        .button:hover {
+            background: #1d4ed8;
+        }
+
+        ul {
+            padding-left: 20px;
+        }
+
+        li {
+            margin-bottom: 10px;
+        }
+
+        footer {
+            margin-top: 40px;
+            font-size: 14px;
+            color: #64748b;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="badge">M2iBank - Digital Core Banking System</div>
+
+    <h1 th:text="${applicationName}">DigiBank</h1>
+
+    <p th:text="${applicationDescription}">
+        Digital Core Banking System for M2iBank
+    </p>
+
+    <div class="section">
+        <h2>Project Overview</h2>
+        <p>
+            DigiBank is a modular monolithic banking application developed as part of the DevSecOps workshop.
+            It provides core services for customer management, account management and bank transfers.
+        </p>
+    </div>
+
+    <div class="section">
+        <h2>Available Functional Domains</h2>
+        <ul>
+            <li>Customer registration and consultation.</li>
+            <li>Account creation and account listing by customer.</li>
+            <li>Transfer execution between accounts.</li>
+            <li>Transfer history consultation for a specific account.</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h2>API Documentation</h2>
+        <p>
+            The REST API documentation is available through Swagger/OpenAPI.
+        </p>
+        <a class="button" th:href="${swaggerUrl}" href="/swagger-ui.html">Open Swagger UI</a>
+    </div>
+
+    <footer>
+        DigiBank - Workshop 1 - M2iBank - DevSecOps Learning Project
+    </footer>
+</div>
+</body>
+</html>

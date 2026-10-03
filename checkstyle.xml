@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+
+<!DOCTYPE module PUBLIC
+        "-//Checkstyle//DTD Checkstyle Configuration 10.12//EN"
+        "https://checkstyle.org/dtds/configuration_1_3.dtd">
+
+<module name="Checker">
+
+    <!-- Encodage -->
+    <property name="charset" value="UTF-8"/>
+
+    <!-- Taille maximale fichier -->
+    <module name="FileLength">
+        <property name="max" value="3000"/>
+    </module>
+
+
+    <!-- Règles Java -->
+    <module name="TreeWalker">
+
+        <!-- Imports -->
+        <module name="AvoidStarImport"/>
+        <module name="UnusedImports"/>
+
+
+        <!-- Nommage simple -->
+        <module name="TypeName"/>
+        <module name="MethodName"/>
+        <module name="LocalVariableName"/>
+        <module name="ConstantName"/>
+
+
+        <!-- Erreurs Java fréquentes -->
+        <module name="EmptyStatement"/>
+        <module name="EqualsHashCode"/>
+        <module name="NeedBraces"/>
+
+
+        <!-- Espacement -->
+        <module name="WhitespaceAround"/>
+        <module name="WhitespaceAfter"/>
+
+
+        <!-- Modificateurs -->
+        <module name="ModifierOrder"/>
+
+    </module>
+
+</module>

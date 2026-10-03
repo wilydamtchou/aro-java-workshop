@@ -1,0 +1,292 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.m2ibank</groupId>
+  <artifactId>digibank-parent</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>digibank-parent</name>
+  <description>DigiBank modular monolith parent project</description>
+
+  <modules>
+    <module>common-module</module>
+    <module>customer-module</module>
+    <module>account-module</module>
+    <module>transfer-module</module>
+    <module>digibank-web</module>
+  </modules>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    <java.version>21</java.version>
+    <spring.boot.version>3.4.3</spring.boot.version>
+    <springdoc.version>2.8.5</springdoc.version>
+    <cucumber.version>7.18.0</cucumber.version>
+    <junit.version>5.10.2</junit.version>
+    <maven.compiler.plugin.version>3.13.0</maven.compiler.plugin.version>
+    <envfile.path>${session.executionRootDirectory}/.env</envfile.path>
+
+    <sonar.maven.plugin.version>3.11.0.3922</sonar.maven.plugin.version>
+    <sonar.projectKey>${env.SONAR_PROJECT_KEY}</sonar.projectKey>
+    <sonar.projectName>${env.SONAR_PROJECT_NAME}</sonar.projectName>
+    <sonar.dependencyCheck.htmlReportPath>target/dependency-check-report.html</sonar.dependencyCheck.htmlReportPath>
+    <sonar.dependencyCheck.jsonReportPath>target/dependency-check-report.json</sonar.dependencyCheck.jsonReportPath>
+    <sonar.dependencyCheck.reportPath>target/dependency-check-report.xml</sonar.dependencyCheck.reportPath>
+    <sonar.pitest.reportPaths>target/pit-reports/mutations.xml</sonar.pitest.reportPaths>
+    <sonar.token>${env.SONAR_TOKEN}</sonar.token>
+    <sonar.login>${env.SONAR_TOKEN}</sonar.login>
+    <sonar.host.url>${env.SONAR_HOST_URL}</sonar.host.url>
+    <sonar.organization>${env.SONAR_ORGANIZATION}</sonar.organization>
+    <sonar.coverage.exclusions>
+      **/api/ApiError.java,
+      **/api/ApiResponse.java,
+      **/exception/**/*.java,
+      **/bootstrap/**/*.java,
+      **/entity/**/*.java,
+      **/entities/**/*.java,
+      **/model/**/*.java,
+      **/dto/**/*.java,
+      **/*Controller.java,
+      **/*Application.java,
+      **/config/**/*.java
+    </sonar.coverage.exclusions>
+    <sonar.cpd.exclusions>
+      **/dto/**/*.java,
+      **/entity/**/*.java,
+      **/entities/**/*.java
+    </sonar.cpd.exclusions>
+
+    <dependency-check.version>10.0.4</dependency-check.version>
+    <pitest.version>1.17.0</pitest.version>
+    <pitest.junit5.plugin.version>1.2.1</pitest.junit5.plugin.version>
+    <surefire.version>3.2.5</surefire.version>
+    <nvd.api.key>${env.NVD_API_KEY}</nvd.api.key>
+
+    <!-- JaCoCo / SpotBugs / PMD / Checkstyle versions -->
+    <jacoco.version>0.8.12</jacoco.version>
+    <spotbugs.maven.plugin.version>4.8.6.4</spotbugs.maven.plugin.version>
+    <pmd.maven.plugin.version>3.21.0</pmd.maven.plugin.version>
+    <checkstyle.maven.plugin.version>3.5.0</checkstyle.maven.plugin.version>
+
+    <jackson-bom.version>2.18.9</jackson-bom.version> <!-- ou plus récent -->
+    <postgresql.version>42.7.13</postgresql.version>
+    <commons-lang3.version>3.18.0</commons-lang3.version>
+    <swagger-ui.version>5.32.7</swagger-ui.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-dependencies</artifactId>
+        <version>${spring.boot.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.commons</groupId>
+        <artifactId>commons-lang3</artifactId>
+        <version>${commons-lang3.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.postgresql</groupId>
+        <artifactId>postgresql</artifactId>
+        <version>${postgresql.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+        <version>${jackson-bom.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.webjars</groupId>
+        <artifactId>swagger-ui</artifactId>
+        <version>${swagger-ui.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+
+        <!-- Compiler -->
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>${maven.compiler.plugin.version}</version>
+          <configuration>
+            <release>${java.version}</release>
+          </configuration>
+        </plugin>
+
+        <!-- Sonar -->
+        <plugin>
+          <groupId>org.sonarsource.scanner.maven</groupId>
+          <artifactId>sonar-maven-plugin</artifactId>
+          <version>${sonar.maven.plugin.version}</version>
+        </plugin>
+
+        <!-- JaCoCo -->
+        <plugin>
+          <groupId>org.jacoco</groupId>
+          <artifactId>jacoco-maven-plugin</artifactId>
+          <version>${jacoco.version}</version>
+          <executions>
+            <execution>
+              <goals>
+                <goal>prepare-agent</goal>
+                <goal>report</goal>
+              </goals>
+            </execution>
+          </executions>
+        </plugin>
+
+        <!-- SpotBugs -->
+        <plugin>
+          <groupId>com.github.spotbugs</groupId>
+          <artifactId>spotbugs-maven-plugin</artifactId>
+          <version>${spotbugs.maven.plugin.version}</version>
+          <configuration>
+            <xmlOutput>true</xmlOutput>
+            <failOnError>false</failOnError>
+          </configuration>
+        </plugin>
+
+        <!-- PMD -->
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-pmd-plugin</artifactId>
+          <version>${pmd.maven.plugin.version}</version>
+          <configuration>
+            <failOnViolation>false</failOnViolation>
+          </configuration>
+        </plugin>
+
+        <!-- Checkstyle -->
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-checkstyle-plugin</artifactId>
+          <version>${checkstyle.maven.plugin.version}</version>
+
+          <dependencies>
+            <dependency>
+              <groupId>com.puppycrawl.tools</groupId>
+              <artifactId>checkstyle</artifactId>
+              <version>10.17.0</version>
+            </dependency>
+          </dependencies>
+
+          <configuration>
+            <configLocation>${maven.multiModuleProjectDirectory}/checkstyle.xml</configLocation>
+            <failsOnError>false</failsOnError>
+            <outputFile>
+              ${project.build.directory}/checkstyle-result.xml
+            </outputFile>
+          </configuration>
+        </plugin>
+
+        <!-- PITest -->
+        <plugin>
+          <groupId>org.pitest</groupId>
+          <artifactId>pitest-maven</artifactId>
+          <version>${pitest.version}</version>
+          <dependencies>
+            <dependency>
+              <groupId>org.pitest</groupId>
+              <artifactId>pitest-junit5-plugin</artifactId>
+              <version>${pitest.junit5.plugin.version}</version>
+            </dependency>
+          </dependencies>
+          <configuration>
+            <targetClasses>
+              <param>com.m2ibank.*.*</param>
+            </targetClasses>
+            <targetTests>
+              <param>com.m2ibank.*.*</param>
+            </targetTests>
+            <threads>4</threads>
+            <outputFormats>
+              <param>XML</param>
+              <param>HTML</param>
+            </outputFormats>
+          </configuration>
+        </plugin>
+
+      </plugins>
+    </pluginManagement>
+
+    <plugins>
+      <!-- .env loader -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>properties-maven-plugin</artifactId>
+        <version>1.2.1</version>
+        <executions>
+          <execution>
+            <id>load-local-env</id>
+            <phase>initialize</phase>
+            <goals>
+              <goal>read-project-properties</goal>
+            </goals>
+            <configuration>
+              <files>
+                <file>${envfile.path}</file>
+              </files>
+              <quiet>true</quiet>
+              <skip>${env.CI}</skip>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- Surefire -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>${surefire.version}</version>
+      </plugin>
+
+      <!-- OWASP DC -->
+      <plugin>
+        <groupId>org.owasp</groupId>
+        <artifactId>dependency-check-maven</artifactId>
+        <version>${dependency-check.version}</version>
+        <configuration>
+          <formats>
+            <format>HTML</format>
+            <format>JSON</format>
+            <format>XML</format>
+          </formats>
+          <failBuildOnCVSS>10</failBuildOnCVSS>
+          <nvdApiKey>${nvd.api.key}</nvdApiKey>
+          <dataDirectory>${session.executionRootDirectory}/odc-data</dataDirectory>
+          <ossindexAnalyzerEnabled>false</ossindexAnalyzerEnabled>
+          <suppressionFiles>
+            <suppressionFile>${session.executionRootDirectory}/dependency-check-suppressions.xml</suppressionFile>
+          </suppressionFiles>
+        </configuration>
+      </plugin>
+
+      <!-- PITest -->
+      <plugin>
+        <groupId>org.pitest</groupId>
+        <artifactId>pitest-maven</artifactId>
+        <version>${pitest.version}</version>
+      </plugin>
+
+      <!-- JaCoCo -->
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+      </plugin>
+
+    </plugins>
+  </build>
+
+</project>

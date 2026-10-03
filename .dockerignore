@@ -1,0 +1,13 @@
+.git
+.gitignore
+.idea
+.vscode
+target
+** /target
+node_modules
+dast
+reports
+* .log
+.env
+.env.*
+dependency-check-report.html

@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<profile>
+    <name>DigiBank-SAST</name>
+    <language>java</language>
+
+    <rules>
+
+        <!-- ===== SonarJava Rules ===== -->
+        <rule>
+            <repository>java</repository>
+            <key>S2637</key>
+            <priority>MAJOR</priority>
+        </rule>
+
+        <rule>
+            <repository>java</repository>
+            <key>S2259</key>
+            <priority>CRITICAL</priority>
+        </rule>
+
+        <rule>
+            <repository>java</repository>
+            <key>S3750</key>
+            <priority>CRITICAL</priority>
+        </rule>
+
+        <rule>
+            <repository>java</repository>
+            <key>S2068</key>
+            <priority>CRITICAL</priority>
+        </rule>
+
+        <rule>
+            <repository>java</repository>
+            <key>S2092</key>
+            <priority>CRITICAL</priority>
+        </rule>
+
+        <rule>
+            <repository>java</repository>
+            <key>S1130</key>
+            <priority>MAJOR</priority>
+        </rule>
+
+        <rule>
+            <repository>java</repository>
+            <key>S112</key>
+            <priority>MAJOR</priority>
+        </rule>
+
+        <rule>
+            <repository>java</repository>
+            <key>S1166</key>
+            <priority>MAJOR</priority>
+        </rule>
+
+        <rule>
+            <repository>java</repository>
+            <key>S2225</key>
+            <priority>CRITICAL</priority>
+        </rule>
+
+        <rule>
+            <repository>java</repository>
+            <key>S6299</key>
+            <priority>CRITICAL</priority>
+        </rule>
+
+
+        <!-- ===== FindSecBugs Rules ===== -->
+        <rule>
+            <repository>findsecbugs</repository>
+            <key>INPUT_VALIDATION</key>
+            <priority>CRITICAL</priority>
+        </rule>
+
+        <rule>
+            <repository>findsecbugs</repository>
+            <key>HARD_CODE_PASSWORD</key>
+            <priority>CRITICAL</priority>
+        </rule>
+
+        <rule>
+            <repository>findsecbugs</repository>
+            <key>LOG_SENSITIVE_DATA</key>
+            <priority>CRITICAL</priority>
+        </rule>
+
+        <rule>
+            <repository>findsecbugs</repository>
+            <key>WEAK_EXCEPTION</key>
+            <priority>MAJOR</priority>
+        </rule>
+
+
+        <!-- ===== Custom Regex Rules ===== -->
+
+        <!-- DTO Validation Required -->
+        <rule>
+            <repository>generic</repository>
+            <key>DTO_VALIDATION_REQUIRED</key>
+            <name>DTO must contain validation annotations</name>
+            <priority>MAJOR</priority>
+            <params>
+                <param>
+                    <key>regex</key>
+                    <value>class\s+\w*(DTO|Request)[^{]*\{[^}]*String\s+\w+;(?![^@]*@(NotBlank|NotNull|Pattern|Email))</value>
+                </param>
+                <param>
+                    <key>message</key>
+                    <value>DTO fields must contain validation annotations (@NotBlank, @NotNull, @Pattern, @Email)</value>
+                </param>
+            </params>
+        </rule>
+
+        <!-- No printStackTrace -->
+        <rule>
+            <repository>generic</repository>
+            <key>NO_PRINTSTACKTRACE</key>
+            <name>No printStackTrace allowed</name>
+            <priority>CRITICAL</priority>
+            <params>
+                <param>
+                    <key>regex</key>
+                    <value>printStackTrace\s*\(</value>
+                </param>
+                <param>
+                    <key>message</key>
+                    <value>Stack traces must not be exposed.</value>
+                </param>
+            </params>
+        </rule>
+
+        <!-- No generic exceptions -->
+        <rule>
+            <repository>generic</repository>
+            <key>NO_GENERIC_EXCEPTION</key>
+            <name>No generic exceptions</name>
+            <priority>MAJOR</priority>
+            <params>
+                <param>
+                    <key>regex</key>
+                    <value>throw new (Exception|RuntimeException)</value>
+                </param>
+                <param>
+                    <key>message</key>
+                    <value>Use custom exceptions instead of generic ones.</value>
+                </param>
+            </params>
+        </rule>
+
+        <!-- No secrets in YAML -->
+        <rule>
+            <repository>generic</repository>
+            <key>NO_SECRET_IN_YAML</key>
+            <name>No secrets in YAML</name>
+            <priority>CRITICAL</priority>
+            <params>
+                <param>
+                    <key>regex</key>
+                    <value>(password|secret|apikey|token)\s*:\s*['"].*['"]</value>
+                </param>
+                <param>
+                    <key>message</key>
+                    <value>Hardcoded secrets detected in configuration files.</value>
+                </param>
+            </params>
+        </rule>
+
+        <!-- @Valid required -->
+        <rule>
+            <repository>generic</repository>
+            <key>VALID_REQUIRED</key>
+            <name>@Valid must be present on all @RequestBody DTOs</name>
+            <priority>MAJOR</priority>
+            <params>
+                <param>
+                    <key>regex</key>
+                    <value>@RequestBody(?![^)]*@Valid)</value>
+                </param>
+                <param>
+                    <key>message</key>
+                    <value>@Valid is required on all @RequestBody DTOs.</value>
+                </param>
+            </params>
+        </rule>
+
+    </rules>
+</profile>
