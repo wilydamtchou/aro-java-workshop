@@ -82,8 +82,13 @@ Dans le dépôt : **Settings → Secrets and variables → Actions → New repos
 
 | Secret | Description | Exemple |
 |---|---|---|
-| `OPENSHIFT_SERVER` | URL de l'API du cluster | `https://api.sandbox-xxxx.openshiftapps.com:6443` |
 | `OPENSHIFT_TOKEN` | Token de connexion | obtenu via *Copy login command → Display Token* |
+
+Dans le dépôt : **Settings → Secrets and variables → Actions → New repository variable**.
+
+| Secret | Description | Exemple |
+|---|---|---|
+| `OPENSHIFT_SERVER` | URL de l'API du cluster | `https://api.sandbox-xxxx.openshiftapps.com:6443` |
 | `OPENSHIFT_NAMESPACE` | Projet de déploiement | `monutilisateur-dev` |
 
 Le token du Sandbox expire après environ 24 heures. Quand le login échoue avec *Unauthorized*, il faut le régénérer et mettre le secret à jour.
