@@ -306,8 +306,7 @@ jobs:
       - name: Récupérer l'URL
         id: url
         run: |
-          HOST=$(oc get route $APP_NAME -o jsonpath='{.spec.host}')
-          echo "app_url=https://$HOST" >> "$GITHUB_OUTPUT"
+          echo "app_url=https://$(oc get route $APP_NAME -o jsonpath='{.spec.host}')" >> $GITHUB_OUTPUT
 
       - name: Attendre /actuator/health
         run: |
