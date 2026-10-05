@@ -10,7 +10,7 @@ Le TP prolonge les ateliers de sécurité précédents (Workshop 3 : analyse dyn
 
 - Comprendre les concepts de base d'OpenShift : projet (namespace), BuildConfig, ImageStream, Deployment, Service, Route.
 - Déployer une application Spring Boot avec la méthode **S2I (Source-to-Image)** en *binary build*, sans Dockerfile.
-- Externaliser la configuration de l'application dans des variables d'environnement.
+- Externaliser la configuration : paramètres non sensibles dans une **ConfigMap**, identifiants dans un **Secret** OpenShift.
 - Automatiser build, tests et déploiement avec GitHub Actions, avec un lancement manuel et le choix de la branche.
 - Valider le déploiement : health check Actuator, Swagger/OpenAPI, tests d'API Newman.
 
@@ -60,8 +60,8 @@ oc start-build (binary build S2I)
    │  jar -> image builder ubi9/openjdk-21
    ▼
 ImageStream  ->  Deployment (1 pod)  ->  Service  ->  Route HTTPS
-                                                        │
-                                              Newman (tests d'API)
+                    ▲                                   │
+         ConfigMap + Secret                   Newman (tests d'API)
 ```
 
 Le jar est construit dans GitHub Actions, puis envoyé à OpenShift. L'image est assemblée dans le cluster par S2I à partir de l'image builder Java de Red Hat (`registry.access.redhat.com/ubi9/openjdk-21`). Cette image s'exécute avec un utilisateur non-root, comme l'exige OpenShift.
@@ -85,6 +85,7 @@ Dans le dépôt : **Settings → Secrets and variables → Actions**.
 | Secret | Description | Exemple |
 |---|---|---|
 | `OPENSHIFT_TOKEN` | Token de connexion | obtenu via *Copy login command → Display Token* |
+| `DB_PASSWORD` (optionnel) | Mot de passe de la base, stocké ensuite dans le Secret OpenShift | vide par défaut (H2 en mémoire l'accepte) |
 
 **Onglet Variables → New repository variable**
 
@@ -124,7 +125,7 @@ Le menu « Use workflow from » désigne la branche d'où provient le fichier du
 | 2 | `unit-tests` | Tests JUnit (hors Cucumber) |
 | 2 | `cucumber-tests` | Scénarios Cucumber |
 | 2 | `jacoco` | Rapport de couverture de code |
-| 3 | `deploy` | Build S2I dans OpenShift, déploiement, probes, validation Actuator et Swagger |
+| 3 | `deploy` | Build S2I dans OpenShift, création de la ConfigMap et du Secret, déploiement, probes, validation Actuator et Swagger |
 | 4 | `newman` | Tests d'API sur l'application déployée |
 
 L'URL de la route est transmise au job `newman` par un artefact (`app-url`) en plus de l'output du job `deploy`.
@@ -133,20 +134,31 @@ Les étapes 2 s'exécutent en parallèle. Le déploiement ne démarre que si les
 
 ## Configuration de l'application dans OpenShift
 
-Les variables du pod sont définies à un seul endroit, dans le bloc `APP_ENV` du workflow :
+La configuration est séparée en deux objets OpenShift, créés ou mis à jour à chaque run puis injectés dans le pod :
+
+| Objet | Contenu | Source dans le workflow |
+|---|---|---|
+| ConfigMap `digibank-config` | profil, URL de la base, driver, Flyway, logs, port, mémoire JVM | bloc `APP_ENV` |
+| Secret `digibank-secret` | `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD` | `DB_USERNAME` (workflow) et secret GitHub `DB_PASSWORD` |
+
+Les noms des deux objets sont définis par `CONFIGMAP_NAME` et `SECRET_NAME` dans le workflow.
 
 ```yaml
 APP_ENV: |
   SPRING_PROFILES_ACTIVE=dev
   SPRING_DATASOURCE_URL=jdbc:h2:mem:digibank;DB_CLOSE_DELAY=-1
   SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.h2.Driver
-  SPRING_DATASOURCE_USERNAME=sa
-  SPRING_DATASOURCE_PASSWORD=
   SPRING_FLYWAY_LOCATIONS=classpath:db/migration/h2
   SPRING_FLYWAY_DEFAULT_SCHEMA=PUBLIC
   SPRING_FLYWAY_SCHEMAS=PUBLIC
   ...
 ```
+
+Déroulement dans le job `deploy` :
+
+1. L'étape « ConfigMap et Secret » écrit `APP_ENV` dans la ConfigMap et les identifiants dans le Secret (`oc create ... --dry-run=client -o yaml | oc apply -f -`, rejouable à chaque run). Les fichiers temporaires sont supprimés ensuite.
+2. L'étape « Configurer l'application » retire d'abord les anciennes variables écrites en dur sur le Deployment (elles auraient priorité sur la ConfigMap et le Secret), puis injecte les deux objets avec `oc set env --from`.
+3. `oc rollout restart` redémarre le pod : modifier une ConfigMap ou un Secret ne redémarre pas les pods automatiquement.
 
 Points importants :
 
@@ -156,7 +168,9 @@ Points importants :
 - **Probes** : `/actuator/health/readiness` et `/actuator/health/liveness`.
 - **Ressources** : requests 100m CPU / 384Mi, limits 500m CPU / 768Mi, adaptées aux quotas du Sandbox.
 
-Pour ajouter ou modifier une variable, il suffit d'éditer `APP_ENV`. Supprimer une ligne ne retire pas la variable du cluster : utiliser `oc set env deployment/digibank NOM_VAR-`.
+Pour ajouter un paramètre non sensible, il suffit d'ajouter une ligne dans `APP_ENV`. Pour une valeur sensible, il faut l'ajouter au Secret (ligne `printf` de l'étape « ConfigMap et Secret ») et à la liste de nettoyage de l'étape « Configurer l'application ».
+
+Une clé retirée de `APP_ENV` reste dans la ConfigMap existante : supprimer la ConfigMap (`oc delete configmap digibank-config`) avant de relancer le pipeline.
 
 ## Stratégie de déploiement
 
@@ -198,6 +212,10 @@ oc get pods
 oc logs -f deployment/digibank
 oc get route digibank
 oc describe deployment/digibank
+
+oc get configmap digibank-config -o yaml
+oc get secret digibank-secret
+oc set env deployment/digibank --list
 ```
 
 ## Tests d'API (Newman)
@@ -237,6 +255,7 @@ Sans profil, l'application démarre avec H2 en mémoire. Pour PostgreSQL en loca
 | Newman : `Invalid URI "http:///api/customers"` | URL vide : le namespace ou le serveur est encore stocké en secret et masqué par GitHub | Les créer comme variables, supprimer les anciens secrets du même nom, relancer |
 | Échec au pull de l'image builder | Tag indisponible | Vérifier `oc get is -n openshift \| grep -i openjdk`, puis adapter `BUILDER_IMAGE` |
 | Le build utilise une ancienne stratégie | BuildConfig créé lors d'un essai précédent | `oc delete bc/digibank`, puis relancer |
+| Une valeur modifiée dans `APP_ENV` n'est pas prise en compte | Ancienne variable littérale sur le Deployment, ou clé obsolète dans la ConfigMap | Vérifier avec `oc set env deployment/digibank --list`, supprimer la ConfigMap et relancer |
 | Pod en `Pending` | Quota du Sandbox dépassé | Réduire les ressources ou supprimer les anciennes applications |
 | Pod redémarré en boucle au démarrage | Démarrage lent, CPU limité | Augmenter les délais des probes |
 | `/v3/api-docs` répond 401 ou 403 | Spring Security bloque Swagger | Autoriser `/v3/api-docs/**`, `/swagger-ui/**` et `/swagger-ui.html` |
@@ -253,7 +272,7 @@ Sans profil, l'application démarre avec H2 en mémoire. Pour PostgreSQL en loca
 ## Notes de sécurité
 
 - Le profil `dev` expose Swagger, affiche les détails du health check et peut renvoyer des stack traces. L'URL de la route est publique : ne pas la partager et ne pas y déposer de données réelles.
-- Aucun secret n'est stocké dans le dépôt : le token d'accès au cluster est un secret GitHub (le serveur et le namespace, non sensibles, sont des variables), et les variables du pod ne contiennent aucun mot de passe sensible (base H2 en mémoire).
+- Aucun secret n'est stocké dans le dépôt : le token d'accès au cluster est un secret GitHub (le serveur et le namespace, non sensibles, sont des variables), les paramètres non sensibles sont dans une ConfigMap et les identifiants de la base dans un Secret OpenShift. Un Secret n'est qu'encodé en base64 : toute personne ayant accès au projet peut le lire, ce n'est pas du chiffrement.
 - Le scan Trivy du pipeline complet analyse l'image construite à partir du Dockerfile, pas l'image assemblée par S2I dans OpenShift. L'image S2I repose sur une image de base Red Hat maintenue et s'exécute en non-root.
 - Pour un environnement partagé, repasser Swagger en mode désactivé (profil `qa`) et limiter le health check détaillé.
 
