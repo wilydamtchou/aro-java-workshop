@@ -11,6 +11,8 @@ name: DigiBank - Build, Tests & Deploy OpenShift Sandbox
 # Secret requis (Settings > Secrets and variables > Actions > Secrets) :
 #   OPENSHIFT_TOKEN      token (Copy login command > Display Token), expire ~24h
 #
+# Secret optionnel : DB_PASSWORD (mot de passe de la base, vide par défaut)
+#
 # Variables requises (onglet Variables, PAS Secrets : un secret masquerait l'URL de la route) :
 #   OPENSHIFT_SERVER     ex: https://api.sandbox-xxxx.openshiftapps.com:6443
 #   OPENSHIFT_NAMESPACE  ex: wilydamtchou-dev
@@ -57,14 +59,19 @@ env:
   APP_CPU_LIMIT: 500m
   APP_MEM_LIMIT: 768Mi
 
-  # Variables injectées dans le pod OpenShift (une par ligne, format CLE=VALEUR)
+  # Noms de la ConfigMap et du Secret OpenShift
+  CONFIGMAP_NAME: digibank-config
+  SECRET_NAME: digibank-secret
+
+  # Identifiant de la base (stocké dans le Secret avec le mot de passe, voir secret DB_PASSWORD)
+  DB_USERNAME: sa
+
+  # Paramètres NON sensibles -> ConfigMap (une ligne par variable, format CLE=VALEUR)
   # Pas de guillemets autour des valeurs.
   APP_ENV: |
     SPRING_PROFILES_ACTIVE=dev
     SPRING_DATASOURCE_URL=jdbc:h2:mem:digibank;DB_CLOSE_DELAY=-1
     SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.h2.Driver
-    SPRING_DATASOURCE_USERNAME=sa
-    SPRING_DATASOURCE_PASSWORD=
     SPRING_FLYWAY_LOCATIONS=classpath:db/migration/h2
     SPRING_FLYWAY_DEFAULT_SCHEMA=PUBLIC
     SPRING_FLYWAY_SCHEMAS=PUBLIC
@@ -276,10 +283,39 @@ jobs:
           oc get route/$APP_NAME >/dev/null 2>&1 || \
             oc create route edge $APP_NAME --service=$APP_NAME --port=8080
 
+      - name: ConfigMap et Secret
+        env:
+          # Secret GitHub optionnel : vide par défaut (H2 en mémoire accepte un mot de passe vide)
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          # ConfigMap : paramètres non sensibles (APP_ENV)
+          printf '%s\n' "$APP_ENV" > config.env
+          oc create configmap $CONFIGMAP_NAME --from-env-file=config.env \
+            --dry-run=client -o yaml | oc apply -f -
+          oc label configmap/$CONFIGMAP_NAME app=$APP_NAME --overwrite
+
+          # Secret : identifiants de la base
+          umask 077
+          printf 'SPRING_DATASOURCE_USERNAME=%s\nSPRING_DATASOURCE_PASSWORD=%s\n' \
+            "$DB_USERNAME" "$DB_PASSWORD" > secret.env
+          oc create secret generic $SECRET_NAME --from-env-file=secret.env \
+            --dry-run=client -o yaml | oc apply -f -
+          oc label secret/$SECRET_NAME app=$APP_NAME --overwrite
+
+          rm -f config.env secret.env
+
       - name: Configurer l'application (profil dev + H2)
         run: |
-          # Variables d'environnement du pod, lues depuis APP_ENV (stdin)
-          printf '%s\n' "$APP_ENV" | oc set env deployment/$APP_NAME --overwrite -e -
+          # Retirer les anciennes variables littérales : elles auraient priorité
+          # sur celles de la ConfigMap et du Secret
+          KEYS=$( { printf '%s\n' "$APP_ENV" | cut -d= -f1
+                    echo SPRING_DATASOURCE_USERNAME
+                    echo SPRING_DATASOURCE_PASSWORD; } | grep -v '^[[:space:]]*$' | sed 's/$/-/' )
+          oc set env deployment/$APP_NAME $KEYS
+
+          # Injection de la ConfigMap et du Secret dans le pod
+          oc set env deployment/$APP_NAME --from=configmap/$CONFIGMAP_NAME
+          oc set env deployment/$APP_NAME --from=secret/$SECRET_NAME
 
           oc scale deployment/$APP_NAME --replicas=$APP_REPLICAS
 
@@ -296,6 +332,8 @@ jobs:
 
           echo "Variables d'environnement du pod :"
           oc set env deployment/$APP_NAME --list | grep -v PASSWORD
+          echo "ConfigMap :"
+          oc get configmap/$CONFIGMAP_NAME -o jsonpath='{.data}' ; echo
 
       - name: Redémarrer et attendre le rollout
         run: |
